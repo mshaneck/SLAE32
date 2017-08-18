@@ -1,0 +1,84 @@
+First step - write the shellcode using C in order to see what steps, syscalls and control flow is needed. I do not often write code like this so I wanted to write it from scratch, getting as low level as possible.
+
+Also, I know that typically the goal of shellcode is short, but I figured there would be plenty of time for short code, but I wanted, for this attempt, to make a robust shell server. So I set about making it able to handle more than one connection. I wanted it to persist. That way, if the connection dies, you can jsut reconnect instead of having to exploit again. That, and it seemed harder, so I figured I would attempt it.
+
+A lot of the definitions are found in:
+
+/usr/include/netinet/in.h
+/* Address to accept any incoming messages.  */
+#define INADDR_ANY              ((in_addr_t) 0x00000000)
+
+/* Structure describing an Internet socket address.  */
+struct sockaddr_in
+  {
+    __SOCKADDR_COMMON (sin_);
+    in_port_t sin_port;                 /* Port number.  */
+    struct in_addr sin_addr;            /* Internet address.  */
+
+    /* Pad to size of `struct sockaddr'.  */
+    unsigned char sin_zero[sizeof (struct sockaddr) -
+                           __SOCKADDR_COMMON_SIZE -
+                           sizeof (in_port_t) -
+                           sizeof (struct in_addr)];
+  };
+
+
+
+
+In /usr/include/i386-linux-gnu/bits/sockaddr.h
+#define __SOCKADDR_COMMON(sa_prefix) \
+  sa_family_t sa_prefix##family
+
+#define __SOCKADDR_COMMON_SIZE  (sizeof (unsigned short int))
+
+#endif  /* bits/sockaddr.h */
+
+
+
+
+
+So attempt 1 at creating persistent bind shell using c, success. The only odd thing is that since I have the parent call wait right away, a second attempt to connect will hang until the first session is terminated. Once the first session ends, the new one will pick up. But I really didn't want to try to get the shellcode to register signal handlers and such, so I'll go ahead and say that if this was used in an exploit, there would only ever be one connection at a time anyway.
+
+So the key calls are to socket, bind, listen, accept, dup2, execve, and waitpid.
+First step is to get the numbers for all of those
+as per /usr/include/i386-linux-gnu/asm/unistd_32.h  :
+#define __NR_socketcall 102
+
+First one that threw me for a loop was socket. I am still getting used to converting to system calls. socket is not a system call but socketcall is. I was able to see the information on other bind shell shellcode, but I wanted to verify for myself. So I loaded up gdb, put a breakpoint at _start, ran it and disassembled __socket (the libc socket). 
+
+PICTURE
+
+As you can see, it makes a call to gs:0x10, so I added a breakpoint there, continued and stepped into that call
+
+That gives us the following code, which you can see ends in a syscall. So step to that point and see what is in the registers.
+
+PICTURE
+
+As you can see, the syscall number is 0x66, which is decimal 102, which lines up with the socketcall system call. The arguments for socketcall are the call type, which appears to be 1 in this case, and the arguments, which is a pointer to the parameters we passed to socket. After the syscall, the eax register is set to the socket file descriptor.
+int socket(int domain, int type, int protocol);
+
+
+Next up, bind. Using the same method, that also appears to be calling the socketcall syscall, with the call type of 2.
+int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+
+Listen is using socketcall with a call type of 4.
+int listen(int sockfd, int backlog);
+
+Accept is using socketcall with a call type of 5.
+int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+
+fork - syscall number 2
+#define __NR_fork 2
+
+dup2
+#define __NR_dup2 63
+int dup2(int oldfd, int newfd);
+
+waitpid 
+#define __NR_waitpid 7
+pid_t waitpid(pid_t pid, int *status, int options);
+
+So we have our syscall numbers ready.
+
+
+So writing the code was straightforward, and it runs, apparently just fine. Problem is that when run as shellcode, it loops immediately, instead of blocking on accept...
