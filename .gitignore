@@ -1,3 +1,4 @@
 .*.swp
 .gdb_history
 peda-session*
+.gdbinit
